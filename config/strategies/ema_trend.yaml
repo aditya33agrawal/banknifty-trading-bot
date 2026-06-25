@@ -1,0 +1,7 @@
+fast_span: 9
+slow_span: 21
+adx_window: 14
+adx_threshold: 20
+sl_atr_mult: 1.5
+target_r: 2.0
+atr_window: 14

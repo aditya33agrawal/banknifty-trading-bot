@@ -1,0 +1,17 @@
+# Default NSE F&O charge templates. VERIFY against current SEBI/exchange/broker
+# circulars before paper/live use — these rates change (plan §6, §14).
+options:
+  brokerage_per_order: 20.0
+  stt_pct_on_sell_premium: 0.1
+  exchange_txn_pct_on_premium: 0.035
+  sebi_pct_on_premium: 0.0001
+  stamp_duty_pct_on_buy_premium: 0.003
+  gst_pct: 18.0
+
+futures:
+  brokerage_per_order: 20.0
+  stt_pct_on_sell_value: 0.02
+  exchange_txn_pct_on_value: 0.0019
+  sebi_pct_on_value: 0.0001
+  stamp_duty_pct_on_buy_value: 0.002
+  gst_pct: 18.0

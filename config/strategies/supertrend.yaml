@@ -1,0 +1,6 @@
+period: 10
+multiplier: 3.0
+min_atr_pct: 0.05
+sl_atr_mult: 1.5
+target_r: 2.0
+atr_window: 14
