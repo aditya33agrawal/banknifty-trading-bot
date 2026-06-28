@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from banknifty_bot.features.indicators import atr as atr_indicator
@@ -22,12 +23,12 @@ class OpenPosition:
     qty: int
     stop_loss: float
     target: float
-    initial_risk: float = 0.0    # |entry - initial_stop| per unit, for R-multiples
-    best_price: float = 0.0      # most favourable price seen (for trailing)
+    initial_risk: float = 0.0
+    best_price: float = 0.0
     bars_held: int = 0
     partial_done: bool = False
     breakeven_done: bool = False
-    stop_moved: bool = False      # stop tightened from its initial level (trail/breakeven)
+    stop_moved: bool = False
 
 
 class BacktestEngine:
@@ -39,9 +40,7 @@ class BacktestEngine:
     first if both are touched in the same bar — conservative).
 
     Optional exit management (`ExitConfig`): ATR trailing stop, breakeven shift,
-    R-multiple partial scale-out, and time stop. The stop level used for a hit
-    test is the one carried *into* the bar; trailing/breakeven updates apply to
-    subsequent bars, so there is no intrabar lookahead.
+    R-multiple partial scale-out, and time stop.
     """
 
     def __init__(
@@ -63,17 +62,32 @@ class BacktestEngine:
         risk = RiskManager(self.risk_cfg)
         atr_series = atr_indicator(df, window=self.atr_window)
 
+        # Pre-extract numpy arrays — avoids per-bar pandas overhead (~10x faster than iterrows)
+        closes      = df["close"].to_numpy(dtype=float)
+        highs       = df["high"].to_numpy(dtype=float)
+        lows        = df["low"].to_numpy(dtype=float)
+        index       = df.index
+        sig_entries = signals["entry"].to_numpy(dtype=float)
+        sig_stops   = signals["stop_loss"].to_numpy(dtype=float)
+        sig_targets = signals["target"].to_numpy(dtype=float)
+        atr_vals    = atr_series.to_numpy(dtype=float)
+
         position: OpenPosition | None = None
         current_day: dt.date | None = None
         session_start_ts: dt.datetime | None = None
+        session_end_ts: dt.datetime | None = None
 
-        for ts, bar in df.iterrows():
-            day = ts.date()
+        for i in range(len(df)):
+            ts    = index[i]
+            day   = ts.date()
+            close = closes[i]
+            high  = highs[i]
+            low   = lows[i]
+            atr   = atr_vals[i]
+
             if day != current_day:
-                # Intraday: flatten any carried position at the session boundary.
-                # Swing (intraday=False): hold across days; exits are stop/target only.
                 if self.risk_cfg.intraday and position is not None:
-                    self._close(portfolio, risk, position, bar, ts, "square_off")
+                    self._close(portfolio, risk, position, close, ts, "square_off")
                     position = None
                 current_day = day
                 risk.new_day(day)
@@ -81,7 +95,9 @@ class BacktestEngine:
                 session_end_ts = pd.Timestamp.combine(day, self.risk_cfg.square_off).tz_localize(ts.tzinfo)
 
             if position is not None:
-                position, closed = self._check_exit(portfolio, risk, position, bar, ts, atr_series.loc[ts])
+                position, closed = self._check_exit(
+                    portfolio, risk, position, high, low, close, ts, atr
+                )
                 if closed:
                     position = None
 
@@ -90,28 +106,35 @@ class BacktestEngine:
                 continue
 
             if position is None and risk.can_open_position():
-                sig = signals.loc[ts]
-                if sig["entry"] != 0 and not risk.in_no_trade_window(
-                    ts, session_start_ts, session_end_ts
-                ):
+                entry_sig = sig_entries[i]
+                if entry_sig != 0 and not risk.in_no_trade_window(ts, session_start_ts, session_end_ts):
                     position = self._open(
-                        risk, sig, bar, ts, atr_series.loc[ts]
+                        risk, entry_sig, sig_stops[i], sig_targets[i], close, ts, atr
                     )
 
             portfolio.mark(ts)
 
         if position is not None:
-            last_ts = df.index[-1]
-            self._close(portfolio, risk, position, df.iloc[-1], last_ts, "square_off")
+            last_i = len(df) - 1
+            self._close(portfolio, risk, position, closes[last_i], index[last_i], "square_off")
 
         return portfolio
 
-    def _open(self, risk: RiskManager, sig: pd.Series, bar: pd.Series, ts: dt.datetime, atr_val: float) -> OpenPosition | None:
-        side = "long" if sig["entry"] == 1 else "short"
+    def _open(
+        self,
+        risk: RiskManager,
+        entry_sig: float,
+        stop_loss: float,
+        target: float,
+        close: float,
+        ts: dt.datetime,
+        atr_val: float,
+    ) -> OpenPosition | None:
+        side = "long" if entry_sig == 1 else "short"
         fill_side = "buy" if side == "long" else "sell"
-        entry_price = self.slippage.adjust(bar["close"], fill_side, atr_val)
+        entry_price = self.slippage.adjust(close, fill_side, atr_val)
 
-        qty = risk.position_size(entry_price, sig["stop_loss"])
+        qty = risk.position_size(entry_price, stop_loss)
         if qty <= 0:
             return None
 
@@ -121,9 +144,9 @@ class BacktestEngine:
             entry_time=ts,
             entry_price=entry_price,
             qty=qty,
-            stop_loss=sig["stop_loss"],
-            target=sig["target"],
-            initial_risk=abs(entry_price - sig["stop_loss"]),
+            stop_loss=stop_loss,
+            target=target,
+            initial_risk=abs(entry_price - stop_loss),
             best_price=entry_price,
         )
 
@@ -132,55 +155,57 @@ class BacktestEngine:
         portfolio: Portfolio,
         risk: RiskManager,
         position: OpenPosition,
-        bar: pd.Series,
+        high: float,
+        low: float,
+        close: float,
         ts: dt.datetime,
         atr_val: float,
     ) -> tuple[OpenPosition | None, bool]:
         if risk.past_square_off(ts):
-            self._close(portfolio, risk, position, bar, ts, "square_off")
+            self._close(portfolio, risk, position, close, ts, "square_off")
             return None, True
 
         long = position.side == "long"
 
         # 1. Hard stop / target using the levels carried into this bar.
-        if (long and bar["low"] <= position.stop_loss) or (not long and bar["high"] >= position.stop_loss):
+        if (long and low <= position.stop_loss) or (not long and high >= position.stop_loss):
             reason = "trail_stop" if position.stop_moved else "stop"
-            self._close(portfolio, risk, position, bar, ts, reason, exit_price=position.stop_loss)
+            self._close(portfolio, risk, position, close, ts, reason, exit_price=position.stop_loss)
             return None, True
         if position.target == position.target and (  # target not NaN
-            (long and bar["high"] >= position.target) or (not long and bar["low"] <= position.target)
+            (long and high >= position.target) or (not long and low <= position.target)
         ):
-            self._close(portfolio, risk, position, bar, ts, "target", exit_price=position.target)
+            self._close(portfolio, risk, position, close, ts, "target", exit_price=position.target)
             return None, True
 
         cfg = self.exit_cfg
 
-        # 2. R-multiple partial scale-out (treated like a target touch on part of the qty).
+        # 2. R-multiple partial scale-out.
         if cfg.partial_exit_r is not None and not position.partial_done and position.initial_risk > 0:
             partial_price = (
                 position.entry_price + cfg.partial_exit_r * position.initial_risk if long
                 else position.entry_price - cfg.partial_exit_r * position.initial_risk
             )
-            touched = bar["high"] >= partial_price if long else bar["low"] <= partial_price
+            touched = high >= partial_price if long else low <= partial_price
             if touched:
                 part_qty = int(position.qty * cfg.partial_exit_pct)
-                part_qty -= part_qty % self.risk_cfg.lot_size  # keep whole lots
+                part_qty -= part_qty % self.risk_cfg.lot_size
                 if 0 < part_qty < position.qty:
                     self._record_trade(portfolio, position, partial_price, part_qty, ts, "partial", risk, partial=True)
                     position.qty -= part_qty
                 position.partial_done = True
-                position.stop_loss = position.entry_price  # protect the runner
+                position.stop_loss = position.entry_price
                 position.breakeven_done = True
                 position.stop_moved = True
 
         # 3. Time stop.
         position.bars_held += 1
         if cfg.time_stop_bars is not None and position.bars_held >= cfg.time_stop_bars:
-            self._close(portfolio, risk, position, bar, ts, "time_stop")
+            self._close(portfolio, risk, position, close, ts, "time_stop")
             return None, True
 
-        # 4. Update best price, then tighten the stop (trailing / breakeven) for next bars.
-        position.best_price = max(position.best_price, bar["high"]) if long else min(position.best_price, bar["low"])
+        # 4. Update best price, then tighten the stop for next bars.
+        position.best_price = max(position.best_price, high) if long else min(position.best_price, low)
 
         if cfg.breakeven_at_r is not None and not position.breakeven_done and position.initial_risk > 0:
             r_now = (
@@ -211,13 +236,13 @@ class BacktestEngine:
         portfolio: Portfolio,
         risk: RiskManager,
         position: OpenPosition,
-        bar: pd.Series,
+        close: float,
         ts: dt.datetime,
         reason: str,
         exit_price: float | None = None,
     ) -> None:
-        raw_exit_price = exit_price if exit_price is not None else bar["close"]
-        self._record_trade(portfolio, position, raw_exit_price, position.qty, ts, reason, risk, partial=False)
+        self._record_trade(portfolio, position, exit_price if exit_price is not None else close,
+                           position.qty, ts, reason, risk, partial=False)
 
     def _record_trade(
         self,

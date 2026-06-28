@@ -7,6 +7,7 @@ without seeing the data they're scored on, which is the honest test the plan dem
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -16,8 +17,11 @@ from banknifty_bot.backtest.runner import run_backtest
 from banknifty_bot.config import AppConfig
 from banknifty_bot.evaluation.metrics import full_report
 from banknifty_bot.strategies.registry import get_strategy
+from banknifty_bot.utils.logging import get_logger
 
 from .search import grid_from_space, score
+
+log = get_logger(__name__)
 
 
 @dataclass
@@ -62,32 +66,57 @@ def walk_forward(
     grid = grid_from_space(space, max_combos=max_combos, seed=cfg.run.seed)
     bounds = _fold_bounds(df.index, n_folds, train_ratio)
 
+    log.info("  %s | grid=%d combos  folds=%d  bars=%d",
+             strategy_name, len(grid), len(bounds), len(df))
+
     fold_rows: list[dict] = []
     oos_equity_parts: list[pd.DataFrame] = []
     oos_trade_parts: list[pd.DataFrame] = []
     last_equity = cfg.risk.initial_equity
+    cell_start = time.perf_counter()
 
     for i, (is_start, is_end, oos_end) in enumerate(bounds):
+        fold_start = time.perf_counter()
         is_df = df.loc[is_start:is_end]
         oos_df = df.loc[is_end:oos_end].iloc[1:]  # exclude the IS boundary bar
         if is_df.empty or oos_df.empty:
+            log.warning("  fold %d/%d — empty IS or OOS slice, skipping", i + 1, len(bounds))
             continue
+
+        log.info("  fold %d/%d  IS %s→%s (%d bars)  OOS →%s (%d bars)  scanning %d combos …",
+                 i + 1, len(bounds),
+                 is_start.strftime("%Y-%m-%d"), is_end.strftime("%Y-%m-%d"), len(is_df),
+                 oos_end.strftime("%Y-%m-%d"), len(oos_df),
+                 len(grid))
 
         # Optimize on in-sample.
         best_params, best_score = None, float("-inf")
-        for params in grid:
+        cleared = 0
+        for j, params in enumerate(grid):
             m = run_backtest(cfg, is_df, strategy_name, params).metrics
-            if m.get("n_trades", 0) < min_trades:   # an edge that barely trades isn't credible
+            if m.get("n_trades", 0) < min_trades:
                 continue
+            cleared += 1
             s = score(m, objective)
             if s > best_score:
                 best_score, best_params = s, params
         if best_params is None:                      # nothing cleared the bar this fold
             best_params = grid[0]
+            log.warning("  fold %d/%d — no combo met min_trades=%d; using grid[0]", i + 1, len(bounds), min_trades)
+        else:
+            log.info("  fold %d/%d — IS scan done: %d/%d combos cleared, best %s=%.3f  params=%s",
+                     i + 1, len(bounds), cleared, len(grid), objective, best_score, best_params)
 
         # Evaluate the chosen params out-of-sample.
         oos = run_backtest(cfg, oos_df, strategy_name, best_params)
         is_m = run_backtest(cfg, is_df, strategy_name, best_params).metrics
+
+        fold_elapsed = time.perf_counter() - fold_start
+        log.info("  fold %d/%d — OOS  Calmar=%.2f  Sharpe=%.2f  trades=%d  MaxDD=%.1f%%  (%.1fs)",
+                 i + 1, len(bounds),
+                 oos.metrics.get("calmar", 0), oos.metrics.get("sharpe", 0),
+                 oos.metrics.get("n_trades", 0), oos.metrics.get("max_drawdown_pct", 0),
+                 fold_elapsed)
 
         fold_rows.append({
             "fold": i + 1,
@@ -117,11 +146,16 @@ def walk_forward(
     oos_metrics = full_report(oos_equity, oos_trades) if not oos_equity.empty else {}
 
     folds_df = pd.DataFrame(fold_rows)
-    # Most frequently selected param set across folds = the robust pick.
     best_overall = {}
     if fold_rows:
         keyed = pd.Series([str(r["params"]) for r in fold_rows])
         winner = keyed.mode().iloc[0]
         best_overall = next(r["params"] for r in fold_rows if str(r["params"]) == winner)
+
+    total_elapsed = time.perf_counter() - cell_start
+    log.info("  %s DONE — OOS Calmar=%.2f  Sharpe=%.2f  trades=%d  elapsed=%.1fs  best_params=%s",
+             strategy_name,
+             oos_metrics.get("calmar", 0), oos_metrics.get("sharpe", 0),
+             oos_metrics.get("n_trades", 0), total_elapsed, best_overall)
 
     return WalkForwardResult(folds_df, oos_equity, oos_trades, oos_metrics, best_overall)
