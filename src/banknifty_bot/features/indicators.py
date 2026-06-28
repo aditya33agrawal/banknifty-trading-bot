@@ -42,10 +42,21 @@ def atr(df: pd.DataFrame, window: int = 14) -> pd.Series:
 
 
 def session_vwap(df: pd.DataFrame) -> pd.Series:
-    """VWAP anchored to the start of each trading session (resets daily)."""
+    """VWAP anchored to the start of each trading session (resets daily).
+
+    Falls back to TWAP (equal-weighted cumulative mean) when volume is all zeros,
+    e.g. for index instruments like ^NSEBANK that carry no traded volume.
+    """
     typical_price = (df["high"] + df["low"] + df["close"]) / 3
-    pv = typical_price * df["volume"]
     day = df.index.normalize()
+
+    if df["volume"].sum() == 0:
+        # TWAP fallback: cumulative mean of typical price per session
+        cum_tp = typical_price.groupby(day).cumsum()
+        bar_n = typical_price.groupby(day).cumcount() + 1
+        return cum_tp / bar_n
+
+    pv = typical_price * df["volume"]
     cum_pv = pv.groupby(day).cumsum()
     cum_vol = df["volume"].groupby(day).cumsum().replace(0, np.nan)
     return cum_pv / cum_vol

@@ -41,11 +41,15 @@ def _session_mask(df: pd.DataFrame) -> pd.Series:
     return pd.Series((t >= start_min) & (t <= end_min), index=df.index)
 
 
-def resample_one(df: pd.DataFrame, rule: str) -> pd.DataFrame:
+def resample_one(df: pd.DataFrame, rule: str, interval: str = "") -> pd.DataFrame:
     resampled = df.resample(rule, label="left", closed="left").agg(
         {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
     )
     resampled = resampled.dropna(subset=["open", "high", "low", "close"])
+    # Daily bars are timestamped at midnight (outside 09:15–15:30), so skip the
+    # intraday session mask; each daily bar already represents one full session.
+    if interval == "1d":
+        return resampled
     mask = _session_mask(resampled)
     return resampled[mask]
 
@@ -84,7 +88,7 @@ def main() -> None:
     for interval in intervals:
         rule = RULE_MAP[interval]
         log.info("Resampling 1m → %s …", interval)
-        resampled = resample_one(df_1m, rule)
+        resampled = resample_one(df_1m, rule, interval)
         if resampled.empty:
             log.warning("No bars produced for %s — skipping.", interval)
             continue
