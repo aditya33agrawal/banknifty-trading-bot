@@ -1,0 +1,16 @@
+# Voting ensemble of the four validated swing edges (members seeded with their
+# walk-forward-best params). Enters on the rising edge of agreement among >= min_votes
+# members' persistent stances; unified ATR stop/target.
+min_votes: 2
+sl_atr_mult: 1.5
+target_r: 2.0
+atr_window: 14
+members:
+  - name: ema_trend
+    params: {fast_span: 12, slow_span: 34, adx_threshold: 20, sl_atr_mult: 1.0, target_r: 2.0}
+  - name: supertrend
+    params: {period: 10, multiplier: 4.0, min_atr_pct: 0.1, sl_atr_mult: 1.0, target_r: 2.0}
+  - name: rsi_reversion
+    params: {rsi_window: 10, oversold: 35, overbought: 70, adx_max: 20, sl_atr_mult: 1.5, target_r: 2.0}
+  - name: donchian
+    params: {channel: 10, trend_sma: 200, use_trend_filter: true, sl_atr_mult: 3.0, target_r: 4.0}

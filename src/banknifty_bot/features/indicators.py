@@ -134,6 +134,15 @@ def opening_range(df: pd.DataFrame, minutes: int = 15) -> pd.DataFrame:
     return pd.DataFrame({"or_high": or_high, "or_low": or_low}, index=df.index)
 
 
+def donchian_channel(df: pd.DataFrame, window: int = 20) -> pd.DataFrame:
+    """Highest-high / lowest-low channel over the prior `window` bars (excludes
+    the current bar, so a close beyond the band is a genuine breakout)."""
+    upper = df["high"].rolling(window).max().shift(1)
+    lower = df["low"].rolling(window).min().shift(1)
+    mid = (upper + lower) / 2
+    return pd.DataFrame({"dc_upper": upper, "dc_lower": lower, "dc_mid": mid}, index=df.index)
+
+
 def rolling_volatility(series: pd.Series, window: int = 20) -> pd.Series:
     return series.pct_change().rolling(window).std()
 

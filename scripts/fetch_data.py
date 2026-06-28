@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 
-from banknifty_bot.config import load_config
+from banknifty_bot.config import is_intraday_interval, load_config
 from banknifty_bot.data.cleaner import clean_ohlcv
 from banknifty_bot.data.providers import PROVIDERS
 from banknifty_bot.data.store import write_partitioned
@@ -35,7 +35,9 @@ def main() -> None:
         log.warning("Provider returned no data.")
         return
 
-    cleaned = clean_ohlcv(raw, cfg.session.start, cfg.session.end)
+    cleaned = clean_ohlcv(
+        raw, cfg.session.start, cfg.session.end, intraday=is_intraday_interval(cfg.data.interval)
+    )
     manifest = write_partitioned(cleaned, cfg.data.processed_dir, cfg.data.symbol, cfg.data.interval)
     log.info("Wrote %d rows. Coverage: %s", len(cleaned), manifest)
 

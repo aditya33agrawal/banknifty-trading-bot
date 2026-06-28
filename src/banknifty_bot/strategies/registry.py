@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from .base import Strategy
+from .donchian import DonchianBreakout
+from .ensemble import Ensemble
 from .orb import OpeningRangeBreakout
 from .regime import RegimeFilter
 from .rsi_reversion import RSIMeanReversion
@@ -15,7 +17,13 @@ REGISTRY: dict[str, type[Strategy]] = {
     "supertrend": SupertrendStrategy,
     "rsi_reversion": RSIMeanReversion,
     "regime_filter": RegimeFilter,
+    "donchian": DonchianBreakout,
+    "ensemble": Ensemble,
 }
+
+# Strategies that work on daily/swing bars (the rest are intraday-only, relying on
+# session VWAP / opening-range mechanics).
+SWING_COMPATIBLE = {"ema_trend", "supertrend", "rsi_reversion", "donchian", "ensemble"}
 
 
 def register(name: str, cls: type[Strategy]) -> None:

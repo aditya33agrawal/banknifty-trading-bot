@@ -1,8 +1,9 @@
-rsi_window: 14
-oversold: 30
+# Walk-forward-best params (scripts/wf_search_all.py).
+rsi_window: 10
+oversold: 35
 overbought: 70
 adx_window: 14
 adx_max: 20
 sl_atr_mult: 1.5
-target_r: 1.5
+target_r: 2.0
 atr_window: 14

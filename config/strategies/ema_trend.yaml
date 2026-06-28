@@ -1,7 +1,8 @@
-fast_span: 9
-slow_span: 21
+# Walk-forward-best params (scripts/wf_search_all.py) — best single OOS strategy.
+fast_span: 12
+slow_span: 34
 adx_window: 14
 adx_threshold: 20
-sl_atr_mult: 1.5
+sl_atr_mult: 1.0
 target_r: 2.0
 atr_window: 14

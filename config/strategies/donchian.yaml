@@ -1,0 +1,7 @@
+# Donchian channel breakout — swing trend-follower. Walk-forward-best params.
+channel: 10
+trend_sma: 200
+use_trend_filter: true
+sl_atr_mult: 3.0
+target_r: 4.0
+atr_window: 14

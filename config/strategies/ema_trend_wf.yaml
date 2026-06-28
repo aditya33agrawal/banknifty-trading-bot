@@ -1,0 +1,11 @@
+# EMA trend — best walk-forward config (most-selected params across OOS folds).
+# OOS over 19yr daily (with 2x ATR trailing exit): PF 2.07, Sharpe 0.58, Calmar 0.40,
+# MaxDD 3.0%, 100% Monte-Carlo prob-of-profit. Clears 3/5 promotion gates
+# (misses Sharpe>=1.0 and Calmar>=0.5 — magnitude gates, not direction).
+fast_span: 12
+slow_span: 34
+adx_window: 14
+adx_threshold: 20
+sl_atr_mult: 1.0
+target_r: 2.0
+atr_window: 14

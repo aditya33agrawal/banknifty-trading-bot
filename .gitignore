@@ -225,3 +225,4 @@ data/processed/*
 outputs/
 *.parquet
 .DS_Store
+docs/

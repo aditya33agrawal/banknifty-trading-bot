@@ -58,6 +58,28 @@ class BacktestConfig(BaseModel):
     slippage_stress_multipliers: list[float] = Field(default_factory=lambda: [1, 2, 4])
 
 
+class FiltersConfig(BaseModel):
+    """Opt-in entry gates (see features/filters.py). All None = no filtering."""
+    trend_sma: int | None = None
+    atr_pct_min: float | None = None
+    atr_pct_max: float | None = None
+    atr_window: int = 14
+    adx_min: float | None = None
+    adx_max: float | None = None
+    adx_window: int = 14
+    time_start: str | None = None
+    time_end: str | None = None
+
+
+class ExitsConfig(BaseModel):
+    """Opt-in exit management (see backtest/exits.py). All None = stop/target only."""
+    trailing_atr_mult: float | None = None
+    breakeven_at_r: float | None = None
+    partial_exit_r: float | None = None
+    partial_exit_pct: float = 0.5
+    time_stop_bars: int | None = None
+
+
 class PromotionGatesConfig(BaseModel):
     min_sharpe_oos: float = 1.0
     min_calmar_oos: float = 0.5
@@ -73,8 +95,19 @@ class AppConfig(BaseModel):
     execution_proxy: ExecutionProxyConfig = Field(default_factory=ExecutionProxyConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     strategy: StrategyConfig = Field(default_factory=StrategyConfig)
+    filters: FiltersConfig = Field(default_factory=FiltersConfig)
+    exits: ExitsConfig = Field(default_factory=ExitsConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
     promotion_gates: PromotionGatesConfig = Field(default_factory=PromotionGatesConfig)
+
+
+DAILY_OR_HIGHER = {"1d", "1wk", "1mo"}
+
+
+def is_intraday_interval(interval: str) -> bool:
+    """True for sub-daily bars (5m, 15m, ...) where intraday session rules and
+    daily square-off apply; False for daily+ swing data held across days."""
+    return interval not in DAILY_OR_HIGHER
 
 
 def load_config(path: str | Path) -> AppConfig:

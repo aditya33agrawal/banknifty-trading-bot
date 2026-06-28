@@ -10,6 +10,15 @@ PARAMS_BY_NAME = {
     "ema_trend": {"fast_span": 5, "slow_span": 13, "adx_window": 5, "adx_threshold": 10, "sl_atr_mult": 1.5, "target_r": 2.0, "atr_window": 5},
     "supertrend": {"period": 5, "multiplier": 2.0, "min_atr_pct": 0.0, "sl_atr_mult": 1.5, "target_r": 2.0, "atr_window": 5},
     "rsi_reversion": {"rsi_window": 5, "oversold": 30, "overbought": 70, "adx_window": 5, "adx_max": 100, "sl_atr_mult": 1.5, "target_r": 1.5, "atr_window": 5},
+    "donchian": {"channel": 10, "trend_sma": 20, "use_trend_filter": False, "sl_atr_mult": 2.0, "target_r": 3.0, "atr_window": 5},
+    "ensemble": {
+        "min_votes": 2, "sl_atr_mult": 1.5, "target_r": 2.0, "atr_window": 5,
+        "members": [
+            {"name": "ema_trend", "params": {"fast_span": 5, "slow_span": 13, "adx_threshold": 10, "sl_atr_mult": 1.5, "target_r": 2.0, "atr_window": 5}},
+            {"name": "supertrend", "params": {"period": 5, "multiplier": 2.0, "min_atr_pct": 0.0, "sl_atr_mult": 1.5, "target_r": 2.0, "atr_window": 5}},
+            {"name": "rsi_reversion", "params": {"rsi_window": 5, "oversold": 30, "overbought": 70, "adx_max": 100, "sl_atr_mult": 1.5, "target_r": 1.5, "atr_window": 5}},
+        ],
+    },
     "regime_filter": {
         "adx_window": 5, "adx_threshold": 20,
         "trend_strategy": "ema_trend",

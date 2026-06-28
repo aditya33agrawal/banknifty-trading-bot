@@ -1,0 +1,58 @@
+run:
+  name: "intraday_run"
+  seed: 42
+  output_dir: "outputs"
+
+data:
+  symbol: "^NSEBANK"
+  provider: "yfinance"        # yfinance (≈60d of 5m) | csv (bulk multi-year)
+  interval: "5m"              # 1m | 5m | 15m
+  start: "2026-05-15"         # yfinance 5m only serves ~60 rolling days
+  end: "2026-06-25"
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  timezone: "Asia/Kolkata"
+
+session:
+  start: "09:15"
+  end: "15:30"
+  square_off: "15:15"
+  no_trade_first_minutes: 5
+  no_trade_last_minutes: 10
+
+execution_proxy:
+  instrument: "futures"
+  lot_size: 15
+  contract_multiplier: 1
+
+risk:
+  initial_equity: 1000000.0
+  risk_per_trade_pct: 1.0
+  daily_max_loss_pct: 3.0
+  max_trades_per_day: 4
+  max_open_positions: 1
+
+strategy:
+  name: "orb"
+  params_file: "config/strategies/orb.yaml"
+
+filters: {}
+exits:
+  trailing_atr_mult: null
+  breakeven_at_r: null
+  partial_exit_r: null
+  partial_exit_pct: 0.5
+  time_stop_bars: null
+
+backtest:
+  costs_file: "config/costs.yaml"
+  slippage_model: "ticks"
+  slippage_value: 1.0
+  slippage_stress_multipliers: [1, 2, 4]
+
+promotion_gates:
+  min_sharpe_oos: 1.0
+  min_calmar_oos: 0.5
+  min_profit_factor: 1.3
+  max_drawdown_pct: 20.0
+  max_cost_pct_of_gross: 40.0

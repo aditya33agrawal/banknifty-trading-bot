@@ -6,11 +6,10 @@ Usage: python scripts/run_backtest.py --config config/config.yaml
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 
 from banknifty_bot.backtest.costs import CostModel
 from banknifty_bot.backtest.engine import BacktestEngine
-from banknifty_bot.backtest.risk import RiskConfig
+from banknifty_bot.backtest.runner import risk_config_from, run_backtest
 from banknifty_bot.backtest.slippage import Slippage
 from banknifty_bot.config import load_config, load_yaml
 from banknifty_bot.data.store import read_partitioned
@@ -38,37 +37,26 @@ def main() -> None:
     log.info("Loaded %d bars [%s -> %s]", len(df), df.index.min(), df.index.max())
 
     strategy_params = load_yaml(cfg.strategy.params_file)
-    strategy = get_strategy(cfg.strategy.name, strategy_params)
-    signals = strategy.generate_signals(df)
+    result = run_backtest(cfg, df, cfg.strategy.name, strategy_params)
 
-    cost_model = CostModel.from_yaml(cfg.backtest.costs_file, cfg.execution_proxy.instrument)
-    slippage = Slippage(cfg.backtest.slippage_model, cfg.backtest.slippage_value)
-
-    risk_cfg = RiskConfig(
-        initial_equity=cfg.risk.initial_equity,
-        risk_per_trade_pct=cfg.risk.risk_per_trade_pct,
-        daily_max_loss_pct=cfg.risk.daily_max_loss_pct,
-        max_trades_per_day=cfg.risk.max_trades_per_day,
-        max_open_positions=cfg.risk.max_open_positions,
-        lot_size=cfg.execution_proxy.lot_size,
-        contract_multiplier=cfg.execution_proxy.contract_multiplier,
-        square_off=dt.time.fromisoformat(cfg.session.square_off),
-        no_trade_first_minutes=cfg.session.no_trade_first_minutes,
-        no_trade_last_minutes=cfg.session.no_trade_last_minutes,
-    )
-
-    engine = BacktestEngine(risk_cfg, cost_model, slippage)
-    portfolio = engine.run(df, signals)
-
-    trades = portfolio.to_trades_df()
-    log.info("Trades: %d | Final equity: %.2f", len(trades), portfolio.equity)
+    trades = result.trades_df
+    log.info("Mode: %s | Trades: %d | Final equity: %.2f",
+             "intraday" if result.intraday else "swing", len(trades), result.portfolio.equity)
     if not trades.empty:
         log.info("Net P&L: %.2f | Total cost: %.2f", trades["net_pnl"].sum(), trades["cost"].sum())
+        m = result.metrics
+        log.info("Sharpe: %.2f | Calmar: %.2f | MaxDD: %.1f%% | PF: %.2f | Win%%: %.1f",
+                 m.get("sharpe", 0), m.get("calmar", 0), m.get("max_drawdown_pct", 0),
+                 m.get("profit_factor", 0), m.get("win_rate_pct", 0))
 
+    # Slippage-stress sweep (fragility check) — re-run the same signals at higher slippage.
+    cost_model = CostModel.from_yaml(cfg.backtest.costs_file, cfg.execution_proxy.instrument)
+    risk_cfg = risk_config_from(cfg)
+    signals = get_strategy(cfg.strategy.name, strategy_params).generate_signals(df)
     for mult in cfg.backtest.slippage_stress_multipliers:
+        slippage = Slippage(cfg.backtest.slippage_model, cfg.backtest.slippage_value)
         stressed_engine = BacktestEngine(risk_cfg, cost_model, slippage.stressed(mult))
-        stressed_pf = stressed_engine.run(df, signals)
-        stressed_trades = stressed_pf.to_trades_df()
+        stressed_trades = stressed_engine.run(df, signals).to_trades_df()
         net = stressed_trades["net_pnl"].sum() if not stressed_trades.empty else 0.0
         log.info("Slippage x%s -> net P&L: %.2f", mult, net)
 
